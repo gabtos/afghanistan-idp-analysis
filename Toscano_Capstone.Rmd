@@ -1,0 +1,1019 @@
+---
+title: "DPSS 2023 Capstone"
+author: "Gabriel Toscano"
+date: "2023-07-28"
+output:
+  html_document:
+    toc: yes
+    toc_depth: '3'
+    df_print: paged
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+*Loading Dependencies*
+```{r dependencies, warning=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(sf)
+library(viridis)
+library(grid)
+#load car package for plotting fitted lm models
+library(car)
+```
+
+
+## Q1: Data Overview 
+### (1.1) Load the UNHCR_Survey data.
+
+```{r read_data, message=FALSE}
+
+un_survey <- read.csv('UNHCR_Survey2.csv')
+
+
+```
+
+### Preliminary Data
+
+
+```{r}
+#read world bank data
+idp_populations <- read.csv("worldbank_data/world-bank-idp-populations.csv", skip = 4)
+idp_populations <- idp_populations[idp_populations$Country.Code == "AFG", ] %>% 
+  select(starts_with("X"))
+
+#Cleanup and pivot data
+start_year = 1960
+end_year = 2022
+year_list <- paste(seq(start_year, end_year), sep = "")
+
+for (i in seq_along(year_list)) {
+  names(idp_populations)[i] <- year_list[as.numeric(i)]
+}
+
+#pivot the idp populations and clean data
+idp_populations <- pivot_longer(idp_populations, cols = everything(), names_to = "year", values_to = "num_idp") %>% 
+  drop_na()
+
+ggplot(idp_populations, aes(x = year, y = num_idp, group=1)) +
+  geom_line() +
+  # geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    x = "Year", 
+    y = "Number IDPs", 
+    title = "Number of IDPs by Year",
+    subtitle = "World Bank Internal Displacement Monitoring Centre"
+    )
+
+```
+
+
+
+### (1.2) Top 10 provinces by number of IDP
+The UNHCR_Survey data is already filtered to only IDP records
+
+```{r IDPs by Province}
+top_10_provinces <- un_survey %>% 
+  dplyr::select(province, total_members) %>% 
+  group_by(province) %>% 
+  summarize(num_idp = sum(total_members)) %>% 
+  arrange(-num_idp) %>% 
+  slice(1:10)
+
+knitr::kable(top_10_provinces)
+
+top_10_districts <- un_survey %>% 
+  dplyr::select(district, total_members) %>% 
+  group_by(district) %>% 
+  summarize(num_idp = sum(total_members)) %>% 
+  arrange(-num_idp) %>% 
+  slice(1:10)
+
+knitr::kable(top_10_districts)
+
+
+
+
+```
+
+```{r Top Provinces}
+
+  ggplot(top_10_provinces) +
+  geom_col(aes(x = reorder(province, num_idp), y = num_idp)) +
+    labs(
+    title = "Total Number of Internally Displaced Persons (IDP) by Province",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Province",
+    y = "Number IDPs"
+  ) +  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+    scale_y_continuous(breaks = seq(0, 20000, by = 2000))
+
+
+  ggplot(top_10_districts) +
+  geom_col(aes(x = reorder(district, num_idp), y = num_idp)) +
+    labs(
+    title = "Total Number of Internally Displaced Persons (IDP) by District",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "District",
+    y = "Number IDPs"
+  ) +  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+    scale_y_continuous(breaks = seq(0, 20000, by = 2000))
+
+```
+
+## Q2: Common Challenges Analysis
+(For Question 2, you need to select five of the six challenges (2.1 - 2.6) to analyze)
+In this part, to investigate the distribution of numerical features, you may consider using visual
+representations such as histograms or box plots. You also need to calculate the statistical
+measurements such as the mean, median, mode, standard deviation, and range to understand the
+distribution of numerical features. To investigate the distribution of categorical features, you may
+consider using a bar graph or any other appropriate methods.
+
+### (2.1) life-sustaining sectoral needs
+#### (2.1.1) Analyze and visualize the distribution of lcs score.
+lcs_score = calc_sold_asset + calc_seek_employment + calc_working + calc_borrow +
+calc_medical_attention.
+```{r lcs_scores, warning=FALSE, message=FALSE}
+
+un_survey <- un_survey %>%
+  mutate(lcs_score = calc_sold_asset + calc_seek_employment + calc_working + calc_borrow + calc_medical_attention)
+
+summary(un_survey$lcs_score)
+
+ggplot(un_survey, aes(x=lcs_score)) +
+ geom_histogram(color="white",binwidth = 1) +
+    labs(
+    title = "LCS Score Distribution",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "LCS Score",
+    y = "Frequency"
+  ) +
+    scale_y_continuous(breaks = seq(0, 1500, by = 2000)) +
+    scale_x_continuous(breaks = seq(0, 6, by=1))
+
+```
+
+
+#### (2.1.2) How severe are their life-sustaining sectoral needs under threat? 
+How many interviewees are in emergency, crisis or stress status? 
+
+```{r lcs}
+
+#Creating the lcs_severity variable
+un_survey <- un_survey %>% 
+  mutate(lcs_severity = case_when(
+                        lcs_score == 0 ~ "None",
+                        lcs_score == 1 ~ "Stress",
+                        lcs_score == 2 ~ "Crisis",
+                        lcs_score >= 3 ~ "Emergency"
+                        ))
+
+#Total number of households by lcs_severity
+lcs_severity_household_count <- un_survey %>% 
+  group_by(lcs_severity) %>% 
+  summarize(count = n()) %>% 
+  arrange(-count)
+
+ggplot(lcs_severity_household_count) +
+geom_col(aes(x = reorder(lcs_severity, -count), y = count)) +
+    labs(
+    title = "Number of Housholds by LCS Severity",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Severity Category",
+    y = "Number Households" ) +  
+  scale_y_continuous(breaks = seq(0, 30000, by = 5000))
+
+knitr::kable(lcs_severity_household_count)
+
+ggplot(un_survey, aes(x=lcs_score)) +
+ geom_histogram(colour="white", binwidth = 1) +
+    labs(
+    title = "LCS Severity Distribution",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "LCS Severity",
+    y = "Frequency"
+  )
+
+
+
+```
+
+
+### (2.2) Food insecurity
+How is the rcsi_score distributed? Analyze the distribution of rcsi_score. Is it left-skewed or
+right-skewed? 
+rcsi_score = ${less_food} + ${borrow_food} * 2 + ${limit_mealtime} + ${restrict_consumption}
+* 3 + ${reduce_meal}. In the survey data, the rcsi_score= foodcoping1 + (foodcoping2 * 2) +
+foodcoping3 + (foodcoping4 * 3) + foodcoping5
+
+RCSI is right skewed in the survey data
+```{r RCSI Score, warning=FALSE, error=FALSE, message=FALSE}
+
+#calculate RCSI Score
+un_survey <- un_survey %>% 
+  mutate(rcsi_score = food_coping1 + (food_coping2 * 2) + food_coping3 + (food_coping4 * 3) + food_coping5)
+
+# Distribution Summary
+summary(un_survey$rcsi_score)
+
+#Plot RCSI distribution
+ggplot(un_survey, aes(x=rcsi_score)) +
+ geom_histogram(colour="black", fill="white", binwidth = 1) +
+    labs(
+    title = "RCSI Score Distribution",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "RCSI Score",
+    y = "Frequency"
+  )
+
+```
+
+What is the correlation between rcsi_score and lcs_score?
+
+```{r lcs,rcsi correlation, warning=FALSE, error=FALSE, message=FALSE}
+cor.test(un_survey$lcs_score, un_survey$rcsi_score, method = "pearson")
+
+
+un_survey %>% ggplot() + 
+  geom_smooth(mapping = aes(x = rcsi_score, y = lcs_score), method=lm) +
+    labs(
+    title = "RCSI Score and LCS Score Correlation",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "RCSI Score",
+    y = "LCS Score"
+  )
+
+```
+
+
+### (2.3) Water Safety
+For water safety analysis, you can consider two variables: "distance_water" (binary feature
+indicating whether the house is more than 500 meters from water) and "latrine" (the type of
+latrine the household has access to). Analyze the distribution of "distance_water" to understand
+how many households are located more than 500 meters from water sources. Additionally,
+examine the distribution of "latrine" to identify the types of latrines accessible to the households.
+```{r water-safety}
+
+water_safety <- un_survey %>% 
+  dplyr::select(distance_water) %>% 
+  drop_na() %>% 
+  group_by(distance_water) %>% 
+  summarize(count = n()) 
+
+
+#Updating blank values to unknown
+water_safety$distance_water[water_safety$distance_water == ""] <- "Unknown"
+
+latrine <- un_survey %>% 
+  dplyr::select(latrine) %>% 
+  group_by(latrine) %>% 
+  summarise(count = n())
+
+#Updating latrine names for graph
+latrine$latrine[latrine$latrine == ""] <- "Unknown"
+latrine$latrine[latrine$latrine == "None (open field, bush) or sahrahi, dearan (area inside or outside compound but not pit), or other"] <- "None, sahrahi, dearan, other"
+
+ggplot(water_safety) +
+  geom_col(aes(x = reorder(distance_water, -count), y = count)) +
+    labs(
+    title = "Distance to Water",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Distance to water > 500 meters",
+    y = "Frequency"
+  )
+
+ggplot(latrine) +
+  geom_col(aes(x = reorder(latrine, -count), y = count)) +
+    labs(
+    title = "Latrine Frequency by Type",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Latrine Type",
+    y = "Frequency"
+  ) +  theme(axis.text.x = element_text(angle = 55, vjust = 1, hjust=1))
+
+
+
+```
+
+
+
+### (2.4) Shelter and Living Conditions:
+#### (2.4.1) Focus on the ‘shelter’ and ‘shelter_number’ and ‘tenure'.
+Analyze the frequency of the different types of shelter, the number of people living in different types of shelter, and the
+distribution of how the tenure is collected.Shelter denotes the type of shelter. Shelter number denotes how many people live in the shelter. Tenure denotes the state of occupation (ownership, renting, etc).
+
+
+```{r shelter}
+num_shelter_type <- un_survey %>%
+  dplyr::select(shelter) %>%
+  group_by(shelter) %>%
+  summarize(count = n()) %>%
+  arrange(-count)
+
+#bundle the lowest frequency cats, and in write-up talk about how they were grouped!! 
+bundle_sum <- 0
+shelter_to_bundle <- c("Tent or Emergency shelter","Makeshift shelter", "Collective centre", "Open space or no shelter", "" )
+for(i in 1:length(num_shelter_type$shelter)){
+  curr_shelter <- num_shelter_type$shelter[i]
+  if (curr_shelter %in% shelter_to_bundle) {
+    bundle_sum <- bundle_sum + num_shelter_type$count[i]
+  }
+}
+  
+#Remove rows that are part of our bundled, and then add the new bundled row 
+num_shelter_type_bundled <- subset(num_shelter_type, !num_shelter_type$shelter %in% shelter_to_bundle) %>% 
+  add_row(shelter = "Informal, emergency or unknown shelter*", count = bundle_sum)
+
+  ggplot(num_shelter_type_bundled) +
+  geom_col(aes(x = reorder(shelter, -count), y = count)) +
+    labs(
+    title = "Total Number of Shelters by Type",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Shelter Type",
+    y = "Number Shelters"
+  ) +  theme(axis.text.x = element_text(angle = 55, vjust = 1, hjust=1)) +
+     scale_y_continuous(breaks = seq(0, 20000, by = 2500))
+  
+
+```
+
+The categories (Tent or Emergency shelter,Makeshift shelter, Collective centre, Open space or no shelter, "") were bundled as: (Informal, emergency or unknown shelter)
+```{r bundle_exp, echo=FALSE}
+knitr::kable(num_shelter_type_bundled)
+```
+
+Distribution of how the tenure is collected.
+```{r tenure}
+
+num_tenure_household <- un_survey %>% 
+  dplyr::select(tenure) %>% 
+  group_by(tenure) %>% 
+  summarize(count = n()) %>% 
+  arrange(-count)
+
+#Shortening row names for graphing
+bundle_sum = 0
+tenure_to_bundle <- c("Other", "")
+for(i in 1:length(num_tenure_household$tenure)){
+  curr_tenure <- num_tenure_household$tenure[i]
+  
+  #add to the bundle sum
+  if (curr_tenure %in% shelter_to_bundle) {
+    bundle_sum <- bundle_sum + num_tenure_household$count[i]
+    
+  #change names 
+  }
+  if(curr_tenure == "Insecure tenure status as rent, hosted, iSETs, labour exchanged, etc..)"){
+    num_tenure_household$tenure[i] <- "Insecure tenure"
+  }
+  if(curr_tenure == "Squatting, as occupation without permission, including collective centres"){
+    num_tenure_household$tenure[i] <- "Squatting"
+  }
+  if(curr_tenure == "Owned (land deed, customary tenure document, letter of permission from government authorities)"){
+    num_tenure_household$tenure[i] <- "Owned"
+  }
+}
+
+#Bundling all blank, other categories
+num_tenure_bundled <- subset(num_tenure_household, !num_tenure_household$tenure %in% tenure_to_bundle) %>% 
+  add_row(tenure = "Other*", count = bundle_sum) %>% 
+  arrange(-count)
+
+  ggplot(num_tenure_bundled) +
+  geom_col(aes(x = reorder(tenure, -count), y = count)) +
+    labs(
+    title = "Total Number of Households by Tenure",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Tenure Type",
+    y = "Frequency"
+  ) +  theme(axis.text.x = element_text(angle = 55, vjust = 1, hjust=1)) 
+```
+The categories ("Other", "") were bundled as: (Other*)
+```{r bundle_tenure_exp, echo=FALSE}
+knitr::kable(num_tenure_bundled)
+```
+
+
+#### (2.4.2) Analyze the distribution of "hh_intentions_movements" which is the household's current movement intentions. 
+Investigate the frequency or proportion of interviewees with different movement intentions. Visualize the distribution using barplot or pie chart to provide a clear representation of the different movement intentions.
+
+```{r movement_intentions}
+movement_intentions <- un_survey %>% 
+  dplyr::select(hh_intentions_movements) %>% 
+  group_by(hh_intentions_movements) %>% 
+  summarize(count = n())
+
+top_movement_plot <- movement_intentions %>%   
+  arrange(-count) %>% 
+  slice(1:2) %>% 
+  ggplot() +
+  geom_col(aes(x = reorder(hh_intentions_movements, -count), y = count/1000)) +
+    labs(
+    title = "Count of Households by Moving Intentions (> 1,000)",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Movement Intention",
+    y = "Household Count (thousands)"
+  ) 
+
+bottom_movement_plot <- movement_intentions %>%   
+  arrange(-count) %>% 
+  slice(3:4) %>% 
+  ggplot() +
+  geom_col(aes(x = reorder(hh_intentions_movements, -count), y = count)) +
+    labs(
+    title = "Count of Households by Moving Intentions (< 1000)",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Movement Intention",
+    y = "Household Count"
+  ) 
+
+
+# Create a new page
+grid.newpage()
+# Next push the vissible area with a layout of 2 columns and 2 row using pushViewport()
+pushViewport(viewport(layout = grid.layout(2,1)))
+print(top_movement_plot, vp = viewport(layout.pos.row = 1, layout.pos.col = 1))
+print(bottom_movement_plot, vp = viewport(layout.pos.row = 2, layout.pos.col = 1))
+
+```
+
+### (2.6) Assistance Received By Household
+For households that have received assistance with clear cash assistance received ("assistance = Yes" and cash_qtty not null), calculate statistical measures on the distribution of “cash_qtty” such as the mean, 25th percentile, 75th percentile, minimum, and maximum values. This analysis will provide insights into the average amount and the spread of cash assistance received by the households.
+
+
+```{r assistance}
+received_assistance <- un_survey %>% 
+  dplyr::select(assistance, cash_qtty) %>% 
+  filter(assistance == "Yes" & !is.na(cash_qtty))
+
+
+received_assistance %>% ggplot(aes(x=cash_qtty/1000)) +
+ geom_histogram(color="white" , binwidth = 1) +
+    labs(
+    title = "Assistance Received by Household",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Cash Assistance Quantity (thousands)",
+    y = "Frequency"
+  )
+
+received_assistance %>% ggplot( aes(x=cash_qtty/1000)) +
+    geom_boxplot(fill="gray") +
+    labs(
+    title = "Assistance Received by Household",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Cash Assistance Quantity (thousands)",
+    y = "Frequency"
+  )
+
+```
+
+
+## Q3: Geography of Displacement
+### (3.1) Create a geographical map of IDP districts. 
+
+```{r displacement, warnings=FALSE, message=FALSE}
+# Reading in the shapefile. Note the geometry column, this is what stores the coordinates that make up a shape
+geography_gdf <- st_read("district398_FixGEo.shp")
+
+#count records (rows) for each district (DISTID)
+district_count <- un_survey %>% 
+  dplyr::select(DISTID) %>% 
+  group_by(DISTID) %>% 
+  summarize(count = n())
+
+geo_count_merge <- merge(geography_gdf, district_count, by = "DISTID", all.x = TRUE)
+
+ggplot() +
+  geom_sf(data = geo_count_merge, aes(fill = count), color="white") +
+    scale_fill_viridis_c(name = "Household Count", breaks = seq(0, 3000, 500))+   labs(
+    title = "Houshold Count by District",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+  ) 
+
+#looking at this plot and the data, there are a total of 398 districts but only 149 have data
+```
+
+
+### (3.2) From Question 2, pick three preferred challenge areas from these 5 options 
+(hint: calculate the average for numeric variables, and most frequent category for categorical variables and use either the
+average or most frequent category to visualize the map):
+  1.LSC Score
+  2.RCSI score
+  3.‘shelter_number’ , ‘hh_intentions_movements'
+
+
+Looking at LCS scores by district, it's clear that most are under high levels of duress related to life-sustaining sectoral needs. The mean for most districts is 3 or above. 
+```{r lcs_map}
+
+district_lcs_avg <- un_survey %>% 
+  dplyr::select(DISTID, lcs_score) %>% 
+  group_by(DISTID) %>% 
+  summarize(avg_lcs = mean(lcs_score))
+
+geo_lcs_count_merge <- merge(geography_gdf, district_lcs_avg, by = "DISTID", all.x = TRUE)
+
+ggplot() +
+  geom_sf(data = geo_lcs_count_merge, aes(fill = avg_lcs), color="white") +
+    scale_fill_viridis_c(name = "Mean LCS Score") +      
+  labs(
+    title = "Mean LCS score by District",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+  ) 
+
+
+```
+
+The map of mean RCSI scores, a metric for food insecurity, shows severe food insecurity clusters in several districts. Other clusters show relatively low levels of food insecurity, particularly in northeast districs. 
+```{r rcsi map}
+
+district_rcsi_avg <- un_survey %>% 
+  dplyr::select(DISTID, rcsi_score) %>% 
+  group_by(DISTID) %>% 
+  summarize(avg_rcsi = mean(rcsi_score))
+
+geo_rcsi_merge <- merge(geography_gdf, district_rcsi_avg, by = "DISTID", all.x = TRUE)
+
+ggplot() +
+  geom_sf(data = geo_rcsi_merge, aes(fill = avg_rcsi), color="white") +
+    scale_fill_viridis_c(name = "Mean RCSI Score") +
+      labs(
+    title = "Mean RCSI score by District",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+  ) 
+```
+Graphing most frequent category for the type of shelter by district, we can infer urbanization and infrastructural needs based on the kinds of constructions that are most prominent. For the majority of regions, with the exception of the northeastern districts, the most prominent shelter remains traditional and mudhouse constructions.
+```{r shelter map, message=FALSE}
+
+#finding the largest category of shelter by district
+district_shelter <- un_survey %>% dplyr::select(DISTID, shelter, shelter_number) %>% 
+  group_by(DISTID, shelter) %>% 
+  summarise(count = sum(shelter_number)) %>% 
+  ungroup() %>% 
+  drop_na() %>% 
+  group_by(DISTID, shelter) %>% 
+  summarise(count = max(count, na.rm = FALSE)) %>% 
+  group_by(DISTID) %>%
+  filter(count == max(count, na.rm=TRUE))
+  
+geo_shelter_merge <- merge(geography_gdf, district_shelter, by = "DISTID", all.x = TRUE)
+
+# plot
+ggplot() + geom_sf(data = geo_shelter_merge, aes(fill = shelter))+     
+  labs(
+    title = "Most Prominent Shelter Type by District",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+  ) 
+
+```
+An overwhelming majority of IDPs report no intention to return to area of origin. Further analysis might inquire into the conditions in districts where there is a higher level of desire to return and understand IDPs motivations. 
+```{r intentions, warnings=FALSE, message=FALSE}
+hh_intentions <- un_survey %>% 
+  dplyr::select(DISTID, hh_intentions_movements) %>% 
+  group_by(DISTID, hh_intentions_movements) %>% 
+  summarize(count = n()) %>% 
+  group_by(DISTID) %>%
+  filter(count == max(count, na.rm=TRUE))
+
+geo_hh_intentions_merge <- merge(geography_gdf, hh_intentions, by = "DISTID", all.x = TRUE)
+
+# plot
+ggplot() + geom_sf(data = geo_hh_intentions_merge, aes(fill = hh_intentions_movements))+     
+  labs(
+    title = "Household Movement Intentions by District",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+  ) 
+  
+```
+
+
+## Q4: Linear Model
+For this part, you will need to combine the datasets: ‘features.csv’ and the ‘displaced_activity.csv’. The key to join is the ‘DISTID’ feature which represents the unique ID of each district.
+
+### (4.1) Construct a Linear Regression or Lasso Regression model
+set your response variable to be the displaced_activity. (Hint: You will need to consider all of the factors in the ‘features.csv’ in your model. Some of them are: urban classification, number of local markets, nighttime light output, military base locations,
+agricultural activity, religiosity, district healthcare infrastructure, various types of aid (electricity, microfinance, road development, water supplies), as well as geographic features (e.g., ruggedness,water source access, wheat suitability).
+
+```{r linear-model, message=FALSE,warning=FALSE, show_col_types = FALSE}
+
+library(caret)
+library(MASS)
+
+
+#reading files
+activity_df <- read_csv('displaced_activity-1.csv') %>% 
+    rename(DISTID = distid )
+features_df <- read_csv("Features-1.csv")
+
+
+#merging dataframes for linear modeling
+lm_data <- merge(activity_df, features_df, by="DISTID") %>% 
+  na.omit() %>% 
+  dplyr::select(c("DISTID","unique_devices","displaced_persons", "urban", "displaced_activity", "nightlight", "shareagri", "district_hospital", "foodmarket_time", "microfinance_aid", "news_tvset", "road_aid", "ruggedness", "project_any", "watersource_time", "suitability_rw_wheat", "affected_opium", "watersupply_aid", "madrassa", "total_markets", "anybase", "religious_involved", "electricity_aid", "project_agriculture"))
+
+
+#Checking distribution of outcome variable
+ggplot(lm_data, aes(x=displaced_activity)) +
+    geom_histogram() +     
+  labs(
+    title = "Displaced Activity Variable Distribution",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Displaced Activity",
+    y = "Frequency")
+
+
+#Strong Covariance between displaced activity and displaced persons, removing displaced persons as a variable
+cov(lm_data$displaced_activity, lm_data$displaced_persons)
+
+
+lm_data <- lm_data %>% 
+  dplyr::select(-displaced_persons)
+
+```
+
+
+##### Fitting Linear Models
+
+**Stepwise Approach**
+The Stepwise approach uses 10-fold cross validation to test every combination of variables and estimate the average prediction error of each of the models. The RMSE statistical metric is used to compare the models and to automatically choose the best one, where best is defined as the model that minimize the RMSE and maximize the R-squared.
+```{r}
+
+##-----------------------------
+# Stepwise Approach
+##-----------------------------
+# Set seed for reproducibility
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+step.model <- train(displaced_activity ~., data = lm_data,
+                    method = "leapBackward", 
+                    tuneGrid = data.frame(nvmax = 1:10),
+                    trControl = train.control
+                    )
+
+#See models' results
+step.model$results
+summary(step.model$finalModel)
+# Get the coefficients of the best performing model
+coef(step.model$finalModel, 3)
+
+#using our best fit model from step-wise regression, we
+#get our final summary using a single linear model
+#There's  covarience here with nighlight and urban variables, which may introduce bias
+lm_best_step <-  lm(displaced_activity~ unique_devices + nightlight + urban + anybase, data = lm_data)
+summary(lm_best_step)
+
+#produce added variable plots
+avPlots(lm_best_step)
+
+# Plot Model predicted values and actual values
+quant_plot <- plot(predict(lm_best_step), lm_data$displaced_activity,
+     xlab = "Predicted Values",
+     ylab = "Observed Values") 
+title(main = "Predicted vs. Observed Values for Stepwise Model",
+      sub = "displaced_activity ~ unique_devices + nightlight + urban + anybase")
+abline(a = 0, b = 1, lwd=2,
+       col = "green") 
+
+
+```
+
+
+**Theory-based Approach**
+Some research suggests that factors outside of our data, such as violence are highly predictive of internal displacement in Afghanistan. Studies in Yemen and Syria show shelter, access to food, water and healthcare to be strongly correlated with rates of internal displacement.
+
+See: 
+Huynh, B., & Basu, S. (2020). Forecasting Internally Displaced Population Migration Patterns in Syria and Yemen. Disaster Medicine and Public Health Preparedness, 14(3), 302-307. doi:10.1017/dmp.2019.73
+
+Tai, X.H., Mehra, S. & Blumenstock, J.E. Mobile phone data reveal the effects of violence on internal displacement in Afghanistan. Nat Hum Behav 6, 624–634 (2022). https://doi.org/10.1038/s41562-022-01336-4
+```{r theory_model, warning=FALSE, message=FALSE}
+##-----------------------------
+# Theory-based Approach
+##-----------------------------
+
+lm_qual <- lm(displaced_activity ~ watersource_time + total_markets + shareagri + project_agriculture, data=lm_data)
+summary(lm_qual)
+
+#produce added variable plots
+avPlots(lm_qual)
+```
+
+### (4.2) Apply appropriate methods to evaluate the accuracy of your model.
+
+**Residuals**: The residuals represent the differences between the actual observed values (displaced_activity) and the predicted values from the model. They provide a measure of how well the model fits the data. In this case, the residuals range from -9731.8 to 29046.4, indicating that the model predictions can deviate from the actual values by a substantial amount.
+
+```{r, warning=FALSE}
+
+model_names <- c("Stepwise Model", "Theory-based Model")
+# Combine the residuals and model identifiers into a data frame
+residuals_data <- data.frame(
+  Model = factor(rep(model_names)),
+  Residuals = c(lm_best_step$residuals, lm_qual$residuals)
+)
+
+residuals_data %>% ggplot( aes(x=Model, y=Residuals, fill=Model)) +
+    geom_boxplot() +
+    scale_fill_viridis(discrete = TRUE, alpha=0.6) +
+    geom_jitter(color="black", size=0.4, alpha=0.9) +
+    theme(
+      legend.position="none",
+      plot.title = element_text(size=11)
+    ) +
+    ggtitle("Comparing Model Performance", subtitle = "Model Residuals") +
+    xlab("") +
+    ylim(-5000, 5000) +
+    coord_flip()
+
+confint(lm_best_step)
+
+ 
+```
+
+Given key metrics(R-squared, Standard Errors,F-tats, and P-Values ), the model resulting from the stepwise approach is more precise and therefore will be the benchmark for analysis. 
+```{=latex}
+
+$displaced_activity = 494.0867 + 13.0810*unique_devices + 604.1393*nightlight - 3618.0027*urban - 1840.1204*anybase$
+
+```
+```{r}
+summary(lm_best_step)
+```
+
+**Coefficients**: Holding other predictors constant, predictor variable coefficients represent the expected change in the outcome variable for a one-unit change in that predictor. All the predictors in our best fit linear model have statistically significant coefficients siince their Pr(>|t|) values are lower than 0.05.
+
+**Residual Standard Error (RSE)**: 3156 on 163 degrees of freedom
+The RSE value provides an estimate of the standard deviation of the residuals. In this case, a value of 3156 means that, on average, the model's predictions deviate from the actual data points by approximately 3156 units.
+This suggests lack of precision in its predictions and unexplained variability. Considering the scale of the outcome variable, which ranges from 0 to 128621, an RSE of 3156 may not necessarily be considered too high, however. The non-normal distribution of our outcome variable may explain the large magnitude of the RSE. A more predictive model and precise estimation may require additional data points or the normalization of the distribution of outcome variables within our dataset by imposing an upper and lower bound. 
+
+**R-squared and Adjusted R-squared**: Multiple R-squared:  0.9231,	Adjusted R-squared:  0.9212 
+These values indicate that approximately 92.31% of the variance in the dependent variable (displaced_activity) can be explained by the predictor variables in the model.The R-squared value shows the proportion of the total variability in the outcome variable that is explained by the model's predictors. A high R-squared value suggests that the model captures a significant portion of the data's variability.
+
+**F-statistic and p-value**:F-statistic: 489.1 on 4 and 163 DF,  p-value: < 2.2e-16. 
+This indicates that the overall model is statistically significant and at least one of the predictor variables has a significant relationship with the outcome variable.
+
+**Conclusion**:
+The linear model seems to have a reasonably good fit to the data, as indicated by the high R-squared value (92.31%) and the statistically significant F-statistic. The model's coefficients are all statistically significant, suggesting that each predictor variable (unique_devices, nightlight, urban, and anybase) has a meaningful impact on the outcome variable (displaced_activity).
+
+As with any linear model, validation may require analysis of how well the model can predict new data. 
+
+#### (4.3) What can we do to assist IDP populations? List three factors that may have the most impact on the level of displaced activity. Explain why.
+
+```{=latex}
+
+$displaced_activity = 494.0867 + 13.0810*unique_devices + 604.1393*nightlight - 3618.0027*urban - 1840.1204*anybase$
+
+```
+
+If our assumption is that displaced_activity should be reduced, a model-based approach suggests that policies should encourage urbanization and the construction of military bases while decreasing unique devices and nighlight. 
+
+The three factors that have the most impact are the existence of bases, urbanization, and the amount of nightlight. Since urbanization and amount of nighlight are often related, covarience between these factors may bias our results. Urbanization in particular, might lead to lower levels of displaced activity since it's usually accompanied by higher governmental and civic society presence, as well as higher security and infrastructure. Moreover, urban zones tend to provide more opportunities for work and education which may also contribute to lower levels of displaced activity. 
+
+If we are interested in both improving the situation of already displaced persons and preventing, research suggests that access to health, water, food along with physical safety may led to more desirable outcomes. However, these factors are outside the scope of this current study.
+
+See: 
+Tai, X.H., Mehra, S. & Blumenstock, J.E. Mobile phone data reveal the effects of violence on internal displacement in Afghanistan. Nat Hum Behav 6, 624–634 (2022). https://doi.org/10.1038/s41562-022-01336-4
+
+Huynh, B., & Basu, S. (2020). Forecasting Internally Displaced Population Migration Patterns in Syria and Yemen. Disaster Medicine and Public Health Preparedness, 14(3), 302-307. doi:10.1017/dmp.2019.73
+
+#### (4.4) Based on your selected most influential factors in 4.3, list five districts where people need the
+most support on these factors.
+
+Given the model analysis, the selection should target places with the least urbanization and anybase index, and the highest nighlight index. 
+
+```{r Factors}
+
+#Find the least urbanized districts (most influential) INCREASE
+lowest_urban <- features_df %>% 
+  dplyr::select(DISTID, urban) %>% 
+  arrange(urban)
+  
+#Find the districts with the least bases INCREASE
+lowest_bases <- features_df %>% 
+  dplyr::select(DISTID, anybase) %>% 
+  arrange(anybase)
+
+#Find the districts with the most nighlight (least influential) DECREASE
+highest_nightlight <- features_df %>% 
+  dplyr::select(DISTID, nightlight) %>% 
+  arrange(-nightlight) 
+
+#put all data frames into list
+df_list <- list(lowest_urban, lowest_bases, highest_nightlight)
+
+#merge all data frames in list
+intervention_dist <- df_list %>% reduce(full_join, by='DISTID') %>% 
+  drop_na() %>% 
+  group_by(urban, anybase, nightlight) %>% 
+  arrange(-nightlight) %>% 
+  filter(urban == 0 & anybase == 0) %>% 
+  ungroup()
+
+intervention_dist_shortlist <- intervention_dist %>% 
+  slice(1:5)
+
+knitr::kable(intervention_dist_shortlist)
+
+```
+
+
+
+## Q5: Over/under Sampling Study
+Use population data to study sampling. Determine whether the UNHCR survey in each region is
+oversampled or undersampled. You may draw a histogram or Kernel Density Estimate (KDE) plot to
+check the distribution of Density of IDP among different regions. 
+Hint: Density of IDP = Count of IDP (UNHCR_Survey.csv) / total population (population.csv).
+
+```{r representative sample size, message=FALSE}
+population <- read_csv("Population.csv") %>% 
+  rename(DISTID = distid)
+
+all_dist_population <- population %>% 
+  summarize(population = sum(total_population)) 
+
+dist_survey_sample <- un_survey %>%
+  dplyr::select(total_members) %>% 
+  drop_na() %>% 
+  summarize(survey_population = sum(total_members))
+#Population 25354500
+#Surveyed population 262740
+#Representative sample size = 2401 with a 2% margin of error at 95% confidence level
+#Since Survey sample size is 262740, we can say that this is a representative sample size with a 0.19% margin of error at 95% confidence level 
+```
+
+
+```{r sample density, message=FALSE, warning=FALSE}
+
+
+#Dropped NA's prior to sum so we keep as many district info as possible
+dist_survey_sample <- un_survey %>%
+  dplyr::select(DISTID, total_members) %>% 
+  drop_na() %>% 
+  group_by(DISTID) %>% 
+  summarise(survey_count = sum(total_members))
+
+dist_survey_sample <- merge(population, dist_survey_sample, by="DISTID") %>% 
+  mutate(idp_density = survey_count / total_population) %>% 
+  mutate(bound = "unbound")
+
+
+#Extreme outliers and a skew
+ggplot(dist_survey_sample, aes(x=idp_density)) +
+    geom_histogram() +     
+  labs(
+    title = "IDP Density Distribution",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "IDP Density",
+    y = "Frequency")
+
+
+#Since we don't have a normal distribution, we'll use the IQR to identify outliers by calculating upper and lower fences
+iqr <- 0.0249496 - 0.0014913
+# Define the normal data range with lower limit as Q1–0.0001*IQR and upper limit as Q3+0.0001*IQR.
+lower_bound = 0.0014913-0.0001*iqr
+upper_bound = 0.0249496+0.0001*iqr
+
+
+dist_survey_sample_bound <- dist_survey_sample %>% 
+  filter(idp_density <= upper_bound & idp_density >= lower_bound) %>% 
+  mutate(type = "bound")
+
+ggplot(dist_survey_sample_bound, aes(x=idp_density)) +
+    geom_histogram() +     
+  labs(
+    title = "IDP Density Distribution (Bound)",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "IDP Density",
+    y = "Frequency")
+
+#Comparing IDP Densities
+#True distribution
+summary(dist_survey_sample$idp_density)
+# sd(dist_survey_sample$idp_density)
+
+#Bound distribution
+summary(dist_survey_sample_bound$idp_density)
+# sd(dist_survey_sample_bound$idp_density)
+
+
+```
+
+
+#### Which places are over/under sampled in the survey?
+
+```{r}
+#we'll consider any districts under the lower bound as undersampled, and any over the upper_bound as oversampled
+dist_survey_oversampled <- dist_survey_sample %>% 
+  dplyr::select(DISTID, idp_density) %>% 
+  filter(idp_density >= upper_bound)
+
+dist_survey_undersampled <- dist_survey_sample %>% 
+  dplyr::select(DISTID, idp_density) %>% 
+  filter(idp_density <= lower_bound)
+
+```
+
+###### Oversampled Districts
+```{r}
+knitr::kable(dist_survey_oversampled)
+```
+
+###### Undersampled Districts
+```{r}
+knitr::kable(dist_survey_undersampled)
+```
+
+
+## Question 6: Brief write-up 
+Based on your analysis, write a brief write-up (no more than 250 words) to summarize your valuable
+findings. In your write-up, you should provide at least three recommendations on how to support the
+internally displaced population in Afghanistan.
+
+Utilizing 2021 UNHRC survey data, this study describes the situation of IDPs in Afghanistan and prescribes policy recommendations based on statistical data analysis. Given the total district population (25,354,500) and our surveyed population (26,2740), the survey sample is representative with a 0.19% margin of error at a 95% confidence level. 
+
+By studying distributions and relationships between variables related to IDP populations, food/water security, and life-sustaining needs, we try to describe the situation of IDPs at a district level. For example, LCS and RSCI scores are positively correlated. Among the ten districts with the highest IDP presence, there is a five-fold difference between the lowest and highest IDP populations. Future policy and humanitarian efforts should consider targeting these high-need areas. 
+
+The study then provides a multivariate linear regression model––a generalized statistical approach for predicting the effects of policy changes. In order to decrease 'displaced_activity' the model-based approach suggests policies that: 
+
+1. Encourage urbanization, particularly in districts with the highest IDP populations
+2. Proliferate and strengthen security forces (i.e. bases)
+3. Decrease nightlight
+
+It should be noted that since urbanization and the amount of nightlight are often related, covariance between these (and other) factors may bias our results.
+
+If we are interested in both improving the situation of already displaced persons and preventing increases in IDPs, research suggests that access to health, water, and food along with physical safety may lead to more desirable outcomes. However, these factors are outside the scope of this current study. 
+
+## Bonus Points: Healthcare Barrier Study (2+8=10 points) Note: This is optional
+(1) Sum all the healthcare_barriers variables from healthcare_barriers1 to healthcare_barriers12
+to calculate the total healthcare barrier.
+
+```{r healthcare barriers}
+
+un_survey_2 <- un_survey %>% 
+  dplyr::select(DISTID, healthcare_barriers1, healthcare_barriers2, healthcare_barriers3, healthcare_barriers4, healthcare_barriers5, healthcare_barriers6, healthcare_barriers7, healthcare_barriers8, healthcare_barriers9, healthcare_barriers10, healthcare_barriers11, healthcare_barriers12)
+
+barrier_list <- c("healthcare_barriers1", "healthcare_barriers2", "healthcare_barriers3", "healthcare_barriers4", "healthcare_barriers5", "healthcare_barriers6", "healthcare_barriers7", "healthcare_barriers8", "healthcare_barriers9", "healthcare_barriers10", "healthcare_barriers11", "healthcare_barriers12")
+
+#replace all NA's with zeros
+un_survey_2 <- un_survey_2 %>%
+  mutate_all(~replace_na(., 0))
+
+#add all healthcare barrier row values
+un_survey_2 <- un_survey_2 %>% 
+  mutate(healthcare_barriers = rowSums(un_survey_2[,barrier_list])) %>% 
+  dplyr::select(DISTID, healthcare_barriers)
+
+
+
+```
+
+(2) Analyze the impact of the healthcare barrier on IDP (Internally Displaced Persons).
+Investigate the relationship between the level of healthcare barriers and the frequency of IDP
+among different districts. Will a lower healthcare barrier lead to a decrease in the number of IDP
+in that district?
+
+
+There is a positive correlation between displaced activity and healthcare barriers. However, utilizing healtcare variables within a linear model, it appears that healthcare barriers are not as predictive (Coeff: 97.58, P-val: 0.387, Rquared 2.182e-05) as the effects of variables previously discussed. 
+```{r}
+
+healthcare_model_data <- merge(lm_data, un_survey_2, by="DISTID")
+
+cor.test(healthcare_model_data$healthcare_barriers, healthcare_model_data$displaced_activity, method = "pearson")
+
+healthcare_model_data %>% ggplot() + 
+  geom_smooth(mapping = aes(x = displaced_activity, y = healthcare_barriers), method=lm) +
+    labs(
+    title = "Displaced Activity and Healthcare Barriers Correlation",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Displaced Activity",
+    y = "Healthcare Barriers"
+  )
+
+ggplot(un_survey_2, aes(x=healthcare_barriers)) +
+ geom_histogram(color="white") +
+    labs(
+    title = "Healthcare Barriers Distribution",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+    x = "Healthcare Barriers Score",
+    y = "Frequency"
+  )
+
+healthcare_model <- lm(displaced_activity ~ healthcare_barriers, data=healthcare_model_data)
+summary(healthcare_model)
+
+geo_count_merge <- merge(geography_gdf, healthcare_model_data, by = "DISTID", all.x = TRUE)
+
+ggplot() +
+  geom_sf(data = geo_count_merge, aes(fill = healthcare_barriers), color="white") +
+    scale_fill_viridis_c(name = "Healthcare Barrier Score", breaks = seq(0, 11, 1)) +
+  labs(
+    title = "Healthcare Score by District",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+  ) 
+
+```
+
