@@ -1,5 +1,5 @@
 ---
-title: "DPSS 2023 Capstone"
+title: "Analysis: Internally Displaced Persons in Afghanistan"
 author: "Gabriel Toscano"
 date: "2023-07-28"
 output:
@@ -7,61 +7,60 @@ output:
     toc: yes
     toc_depth: '3'
     df_print: paged
+    code_folding: hide
+    toc_float: yes
   pdf_document:
     toc: yes
     toc_depth: '3'
 ---
 
+Using UNHCR survey data, this project detects and diagnoses displacement following the change in authority in Afghanistan. The project is inspired by an ongoing study led by Dr. Austin Wright at the University of Chicago in collaboration with the United Nations (UN) and the World Bank. In summary this project:
+
+* Detects patterns of displacement
+* Evaluates the representativeness of data derived from cellphone mobility and population information
+* Identifies factors that contribute to lack of access to public services, health, food insecurity and financial distress
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-*Loading Dependencies*
 ```{r dependencies, warning=FALSE, message=FALSE}
+
+#Loading Dependencies
+
 library(dplyr)
 library(ggplot2)
 library(tidyverse)
 library(sf)
 library(viridis)
 library(grid)
-#load car package for plotting fitted lm models
+#car package for plotting fitted lm models
 library(car)
 ```
 
 
-## Q1: Data Overview 
-### (1.1) Load the UNHCR_Survey data.
-
-```{r read_data, message=FALSE}
-
-un_survey <- read.csv('UNHCR_Survey2.csv')
-
-
-```
-
-### Preliminary Data
-
-
-```{r}
+### Overview: Internally Displaced Populations in Afghanistan
+The number of internally displaced people (IDPs) in Afghanistan has increased significantly since 2009. Though Afghanistan has historically ranked near the bottom across human development indices, the situation was exacerbated by the failure of a NATO-led military invasion and the subsequent regime change in August, 2021. Data from the United Nations Human Rights Commission (UNHCR) was collected to study the ongoing displacement crisis. 
+```{r world_bank_data}
 #read world bank data
-idp_populations <- read.csv("worldbank_data/world-bank-idp-populations.csv", skip = 4)
-idp_populations <- idp_populations[idp_populations$Country.Code == "AFG", ] %>% 
-  select(starts_with("X"))
+idp_populations <- read.csv("UNHRC_afghanistan_idp_data/worldbank_data/world-bank-idp-populations.csv", skip = 4)
+idp_populations <- idp_populations %>% 
+  filter(Country.Name == "Afghanistan" ) %>% 
+  select(starts_with('X'))
+
 
 #Cleanup and pivot data
 start_year = 1960
 end_year = 2022
-year_list <- paste(seq(start_year, end_year), sep = "")
+year_list <- paste(seq(start_year, end_year))
 
 for (i in seq_along(year_list)) {
   names(idp_populations)[i] <- year_list[as.numeric(i)]
 }
 
 #pivot the idp populations and clean data
-idp_populations <- pivot_longer(idp_populations, cols = everything(), names_to = "year", values_to = "num_idp") %>% 
-  drop_na()
+idp_populations <- pivot_longer(idp_populations, cols = everything(), names_to = "year", values_to = "number_of_idps", values_drop_na = TRUE)
 
-ggplot(idp_populations, aes(x = year, y = num_idp, group=1)) +
+ggplot(idp_populations, aes(x = year, y = number_of_idps, group=1)) +
   geom_line() +
   # geom_smooth(method = "lm", se = FALSE) +
   labs(
@@ -74,38 +73,73 @@ ggplot(idp_populations, aes(x = year, y = num_idp, group=1)) +
 ```
 
 
+## UNHCR Data Overview 
 
-### (1.2) Top 10 provinces by number of IDP
-The UNHCR_Survey data is already filtered to only IDP records
+```{r read_data, message=FALSE}
 
-```{r IDPs by Province}
+un_survey <- read.csv('UNHRC_afghanistan_idp_data/UNHCR_Survey2.csv')
+
+```
+
+
+### Top 10 provinces by number of IDPs
+
+The range of the data provides information about the scale of the displacement crisis in each region. Among the most impacted regions, the top five (Fayzabad, Tirin Kot, Shibirghan, Qarabagh, Mazari Sharif) demonstrate significantly higher numbers of IDPs compared to the lower 144 districts in the survey. 
+
+```{r IDPs by Province, message=FALSE, warning=FALSE}
 top_10_provinces <- un_survey %>% 
   dplyr::select(province, total_members) %>% 
   group_by(province) %>% 
-  summarize(num_idp = sum(total_members)) %>% 
-  arrange(-num_idp) %>% 
+  summarize(number_of_idps = sum(total_members)) %>% 
+  arrange(-number_of_idps) %>% 
   slice(1:10)
 
 knitr::kable(top_10_provinces)
 
+
+```
+
+### Top 10 districts by number of IDPs
+```{r top districts, warning=FALSE}
+
 top_10_districts <- un_survey %>% 
-  dplyr::select(district, total_members) %>% 
+  dplyr::select(district, total_members, DISTID) %>% 
   group_by(district) %>% 
-  summarize(num_idp = sum(total_members)) %>% 
-  arrange(-num_idp) %>% 
+  summarise(number_of_idps = sum(total_members)) %>% 
+  arrange(-number_of_idps) %>% 
   slice(1:10)
 
 knitr::kable(top_10_districts)
-
-
-
-
 ```
+
+
+```{r mapping-top-districts, warning=FALSE, message=FALSE}
+# Reading in the shapefile. Note the geometry column, this is what stores the coordinates that make up a shape
+geography_gdf <- st_read("UNHRC_afghanistan_idp_data/district398_FixGEo.shp")
+
+ num_by_district <- un_survey %>% 
+  dplyr::select(district, total_members, DISTID) %>% 
+  group_by(district, DISTID) %>% 
+  summarise(number_of_idps = sum(total_members)) %>% 
+  arrange(-number_of_idps) %>% 
+  slice(1:10)
+
+geo_district_count_merge <- merge(geography_gdf, num_by_district, by = "DISTID", all.x = TRUE)
+
+ggplot() +
+  geom_sf(data = geo_district_count_merge, aes(fill = number_of_idps), color="white") +
+    scale_fill_viridis_c(name = "Number of IDPs") +      
+  labs(
+    title = "Number of IDPs by District",
+    subtitle = "UNHCR Survey Data Afghanistan 2021",
+  ) 
+```
+
 
 ```{r Top Provinces}
 
   ggplot(top_10_provinces) +
-  geom_col(aes(x = reorder(province, num_idp), y = num_idp)) +
+  geom_col(aes(x = reorder(province, number_of_idps), y = number_of_idps)) +
     labs(
     title = "Total Number of Internally Displaced Persons (IDP) by Province",
     subtitle = "UNHCR Survey Data Afghanistan 2021",
@@ -115,8 +149,10 @@ knitr::kable(top_10_districts)
     scale_y_continuous(breaks = seq(0, 20000, by = 2000))
 
 
-  ggplot(top_10_districts) +
-  geom_col(aes(x = reorder(district, num_idp), y = num_idp)) +
+  top_10_districts %>% 
+    select(district, number_of_idps) %>% 
+    ggplot() +
+  geom_col(aes(x = reorder(district, number_of_idps), y = number_of_idps)) +
     labs(
     title = "Total Number of Internally Displaced Persons (IDP) by District",
     subtitle = "UNHCR Survey Data Afghanistan 2021",
@@ -163,7 +199,7 @@ ggplot(un_survey, aes(x=lcs_score)) +
 #### (2.1.2) How severe are their life-sustaining sectoral needs under threat? 
 How many interviewees are in emergency, crisis or stress status? 
 
-```{r lcs}
+```{r lcs, warning=FALSE}
 
 #Creating the lcs_severity variable
 un_survey <- un_survey %>% 
@@ -478,8 +514,6 @@ received_assistance %>% ggplot( aes(x=cash_qtty/1000)) +
 ### (3.1) Create a geographical map of IDP districts. 
 
 ```{r displacement, warnings=FALSE, message=FALSE}
-# Reading in the shapefile. Note the geometry column, this is what stores the coordinates that make up a shape
-geography_gdf <- st_read("district398_FixGEo.shp")
 
 #count records (rows) for each district (DISTID)
 district_count <- un_survey %>% 
@@ -606,9 +640,9 @@ library(MASS)
 
 
 #reading files
-activity_df <- read_csv('displaced_activity-1.csv') %>% 
+activity_df <- read_csv('UNHRC_afghanistan_idp_data/displaced_activity-1.csv') %>% 
     rename(DISTID = distid )
-features_df <- read_csv("Features-1.csv")
+features_df <- read_csv("UNHRC_afghanistan_idp_data/Features-1.csv")
 
 
 #merging dataframes for linear modeling
@@ -829,7 +863,7 @@ check the distribution of Density of IDP among different regions.
 Hint: Density of IDP = Count of IDP (UNHCR_Survey.csv) / total population (population.csv).
 
 ```{r representative sample size, message=FALSE}
-population <- read_csv("Population.csv") %>% 
+population <- read_csv("UNHRC_afghanistan_idp_data/Population.csv") %>% 
   rename(DISTID = distid)
 
 all_dist_population <- population %>% 
