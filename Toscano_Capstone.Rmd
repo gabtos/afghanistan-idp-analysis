@@ -14,16 +14,16 @@ output:
     toc_depth: '3'
 ---
 
-Using UNHCR survey data, this project detects and diagnoses displacement following the change in authority in Afghanistan. The project is inspired by an ongoing study led by Dr. Austin Wright at the University of Chicago in collaboration with the United Nations (UN) and the World Bank. In summary this project:
+Using UNHCR survey data, this project detects and diagnoses displacement following the change in authority in Afghanistan in August, 2021. The project was performed as part of an ongoing study led by Dr. Austin Wright at the University of Chicago in collaboration with the United Nations (UN) and the World Bank. In summary this project:
 
 * Detects patterns of displacement
 * Evaluates the representativeness of data derived from cellphone mobility and population information
-* Identifies factors that contribute to lack of access to public services, health, food insecurity and financial distress
+* Identifies factors that contribute to financial distress, and a lack of access to public services, health, and adequate food supplies
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r dependencies, warning=FALSE, message=FALSE}
+```{r dependencies, warning=FALSE, message=FALSE, include=FALSE}
 
 #Loading Dependencies
 
@@ -36,11 +36,11 @@ library(grid)
 #car package for plotting fitted lm models
 library(car)
 ```
-
-
 ### Overview: Internally Displaced Populations in Afghanistan
-The number of internally displaced people (IDPs) in Afghanistan has increased significantly since 2009. Though Afghanistan has historically ranked near the bottom across human development indices, the situation was exacerbated by the failure of a NATO-led military invasion and the subsequent regime change in August, 2021. Data from the United Nations Human Rights Commission (UNHCR) was collected to study the ongoing displacement crisis. 
-```{r world_bank_data}
+The number of internally displaced people (IDPs) in Afghanistan has increased significantly since 2009. Suffering from the effects of failed military interventions, mismanagement, international sanctions, and climate change, Afghanistan has consistently ranked near the bottom across human development indices.
+
+
+```{r world_bank_data, warning=FALSE, message=FALSE}
 #read world bank data
 idp_populations <- read.csv("UNHRC_afghanistan_idp_data/worldbank_data/world-bank-idp-populations.csv", skip = 4)
 idp_populations <- idp_populations %>% 
@@ -60,62 +60,41 @@ for (i in seq_along(year_list)) {
 #pivot the idp populations and clean data
 idp_populations <- pivot_longer(idp_populations, cols = everything(), names_to = "year", values_to = "number_of_idps", values_drop_na = TRUE)
 
+```
+```{r graph-wb-data, warning=FALSE, message=FALSE,}
+
 ggplot(idp_populations, aes(x = year, y = number_of_idps, group=1)) +
   geom_line() +
-  # geom_smooth(method = "lm", se = FALSE) +
+  geom_smooth(method = "lm", se = FALSE) +
   labs(
     x = "Year", 
     y = "Number IDPs", 
     title = "Number of IDPs by Year",
     subtitle = "World Bank Internal Displacement Monitoring Centre"
     )
-
 ```
 
 
 ## UNHCR Data Overview 
-
-```{r read_data, message=FALSE}
+ In 2021, the United Nations Human Rights Commission (UNHCR) collected data to study the ongoing displacement crisis. A large-scale survey was conducted in 149 districts in Afghanistan resulting in 3,6500 individual observations across 184 variables. Survey data provide key demographic information about surveyed households, including age, gender and household size. Data related to financial and employment status, access to healthcare, water, to name a few, allow for [leading, composite and sentiment (LCS) indicator analysis](https://unstats.un.org/unsd/nationalaccount/docs/ECECESSTAT20192.pdf) and provides avenues for condensing complex data into simple, condensed forms. 
+```{r read_data, message=FALSE, include=FALSE}
 
 un_survey <- read.csv('UNHRC_afghanistan_idp_data/UNHCR_Survey2.csv')
 
 ```
+### District Analysis
+Understanding where displacement is taking place is critical for the development of effective policy and aid programs. At the district level, the range in number of IDPs present demonstrates steep differences in the scale of the displacement crisis. Notably, among the most impacted districts, the top five (Fayzabad, Tirin Kot, Shibirghan, Qarabagh, Mazari Sharif) show significantly higher numbers of IDPs compared to the lower 144 districts in the UNHCR survey. 
+```{css, echo=FALSE}
 
-
-### Top 10 provinces by number of IDPs
-
-The range of the data provides information about the scale of the displacement crisis in each region. Among the most impacted regions, the top five (Fayzabad, Tirin Kot, Shibirghan, Qarabagh, Mazari Sharif) demonstrate significantly higher numbers of IDPs compared to the lower 144 districts in the survey. 
-
-```{r IDPs by Province, message=FALSE, warning=FALSE}
-top_10_provinces <- un_survey %>% 
-  dplyr::select(province, total_members) %>% 
-  group_by(province) %>% 
-  summarize(number_of_idps = sum(total_members)) %>% 
-  arrange(-number_of_idps) %>% 
-  slice(1:10)
-
-knitr::kable(top_10_provinces)
-
-
+table th { border-bottom: 1px solid #ddd; }
+th, td { padding: 5px; }
+tfoot, tr:nth-child(even) { background: #eee; }
+thead {background: #3c3c3c; color:white;}
+tr:hover{background: #ddd}
 ```
-
-### Top 10 districts by number of IDPs
-```{r top districts, warning=FALSE}
-
-top_10_districts <- un_survey %>% 
-  dplyr::select(district, total_members, DISTID) %>% 
-  group_by(district) %>% 
-  summarise(number_of_idps = sum(total_members)) %>% 
-  arrange(-number_of_idps) %>% 
-  slice(1:10)
-
-knitr::kable(top_10_districts)
-```
-
-
 ```{r mapping-top-districts, warning=FALSE, message=FALSE}
 # Reading in the shapefile. Note the geometry column, this is what stores the coordinates that make up a shape
-geography_gdf <- st_read("UNHRC_afghanistan_idp_data/district398_FixGEo.shp")
+geography_gdf <- sf::st_read("UNHRC_afghanistan_idp_data/district398_FixGEo.shp", quiet=TRUE)
 
  num_by_district <- un_survey %>% 
   dplyr::select(district, total_members, DISTID) %>% 
@@ -136,25 +115,35 @@ ggplot() +
 ```
 
 
-```{r Top Provinces}
+```{r top districts, warning=FALSE}
 
-  ggplot(top_10_provinces) +
-  geom_col(aes(x = reorder(province, number_of_idps), y = number_of_idps)) +
-    labs(
-    title = "Total Number of Internally Displaced Persons (IDP) by Province",
-    subtitle = "UNHCR Survey Data Afghanistan 2021",
-    x = "Province",
-    y = "Number IDPs"
-  ) +  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
-    scale_y_continuous(breaks = seq(0, 20000, by = 2000))
+top_10_districts <- un_survey %>% 
+  dplyr::select(district, total_members, DISTID) %>% 
+  group_by(district) %>% 
+  summarise(number_of_idps = sum(total_members)) %>% 
+  arrange(-number_of_idps) %>% 
+  slice(1:10)
 
+
+knitr::kable(
+  top_10_districts,
+  col.names = c("District", "Number of IDPs"),
+  caption = "Top 10 districts by number of IDPs"
+  ) 
+```
+
+
+
+
+
+```{r top_districts}
 
   top_10_districts %>% 
     select(district, number_of_idps) %>% 
     ggplot() +
   geom_col(aes(x = reorder(district, number_of_idps), y = number_of_idps)) +
     labs(
-    title = "Total Number of Internally Displaced Persons (IDP) by District",
+    title = "Internally Displaced Persons by District: Top 10 Districts",
     subtitle = "UNHCR Survey Data Afghanistan 2021",
     x = "District",
     y = "Number IDPs"
@@ -163,22 +152,19 @@ ggplot() +
 
 ```
 
-## Q2: Common Challenges Analysis
-(For Question 2, you need to select five of the six challenges (2.1 - 2.6) to analyze)
-In this part, to investigate the distribution of numerical features, you may consider using visual
-representations such as histograms or box plots. You also need to calculate the statistical
-measurements such as the mean, median, mode, standard deviation, and range to understand the
-distribution of numerical features. To investigate the distribution of categorical features, you may
-consider using a bar graph or any other appropriate methods.
+## Challenges Analysis
+In order to better understand the numerical features of the data set, the following section takes into account categorical features of the data focused on the distribution of these features in statistical terms. 
 
-### (2.1) life-sustaining sectoral needs
-#### (2.1.1) Analyze and visualize the distribution of lcs score.
-lcs_score = calc_sold_asset + calc_seek_employment + calc_working + calc_borrow +
-calc_medical_attention.
+### Life-sustaining sectoral needs
+#### Calculating and visualizing LCS scores
+As mentioned previously, leading, composite and sentiment (LCS) indicators provide insight into the relationships between data points related with shared outcomes and dynamics. In this case, we are calculating a composite metric (lcs_score) based on economic, employment and healthcare scores as a measure of severity of need for life-sustaining sectoral needs. 
+
+$lcs\_score = calc\_sold\_asset + calc\_seek\_employment + calc\_working + calc\_borrow + calc\_medical\_attention$
+
 ```{r lcs_scores, warning=FALSE, message=FALSE}
 
 un_survey <- un_survey %>%
-  mutate(lcs_score = calc_sold_asset + calc_seek_employment + calc_working + calc_borrow + calc_medical_attention)
+  dplyr::mutate(lcs_score = calc_sold_asset + calc_seek_employment + calc_working + calc_borrow + calc_medical_attention)
 
 summary(un_survey$lcs_score)
 
@@ -190,14 +176,14 @@ ggplot(un_survey, aes(x=lcs_score)) +
     x = "LCS Score",
     y = "Frequency"
   ) +
-    scale_y_continuous(breaks = seq(0, 1500, by = 2000)) +
+    scale_y_continuous(breaks = seq(0, 15000, by = 2000)) +
     scale_x_continuous(breaks = seq(0, 6, by=1))
 
 ```
 
 
 #### (2.1.2) How severe are their life-sustaining sectoral needs under threat? 
-How many interviewees are in emergency, crisis or stress status? 
+Looking at the severity of interviewees status, a great majority is currently experiencing acute need with more than 28,153 out of the total 34,260 (82.17%) of those surveyed falling into the highest need category. 
 
 ```{r lcs, warning=FALSE}
 
@@ -216,25 +202,31 @@ lcs_severity_household_count <- un_survey %>%
   summarize(count = n()) %>% 
   arrange(-count)
 
-ggplot(lcs_severity_household_count) +
+
+
+lcs_severy_count_plot <- ggplot(lcs_severity_household_count) +
 geom_col(aes(x = reorder(lcs_severity, -count), y = count)) +
     labs(
     title = "Number of Housholds by LCS Severity",
     subtitle = "UNHCR Survey Data Afghanistan 2021",
     x = "Severity Category",
     y = "Number Households" ) +  
-  scale_y_continuous(breaks = seq(0, 30000, by = 5000))
+  scale_y_continuous(breaks = seq(0, 35000, by = 2000))
 
 knitr::kable(lcs_severity_household_count)
 
-ggplot(un_survey, aes(x=lcs_score)) +
+lcs_severity_dist_plot <- ggplot(un_survey, aes(x=lcs_score)) +
  geom_histogram(colour="white", binwidth = 1) +
     labs(
     title = "LCS Severity Distribution",
     subtitle = "UNHCR Survey Data Afghanistan 2021",
     x = "LCS Severity",
     y = "Frequency"
-  )
+  ) +
+  scale_x_continuous(breaks = seq(0, 5, by = 1)) +
+  scale_y_continuous(breaks = seq(0, 20000, by = 2000))
+
+
 
 
 
@@ -242,13 +234,25 @@ ggplot(un_survey, aes(x=lcs_score)) +
 
 
 ### (2.2) Food insecurity
-How is the rcsi_score distributed? Analyze the distribution of rcsi_score. Is it left-skewed or
-right-skewed? 
-rcsi_score = ${less_food} + ${borrow_food} * 2 + ${limit_mealtime} + ${restrict_consumption}
-* 3 + ${reduce_meal}. In the survey data, the rcsi_score= foodcoping1 + (foodcoping2 * 2) +
-foodcoping3 + (foodcoping4 * 3) + foodcoping5
+The UNHCR survey data provides standardized metrics to measure food related stress and monitor food insecurity. Using this data, we calculate the reduced Coping Strategy Index (RCSI) score whereby the variables record specific strategies for coping with food insecurity. The [UN World Food Program and USAID](https://documents.wfp.org/stellent/groups/public/documents/manual_guide_proced/wfp211058.pdf) utilize RCSI scores as indicators of food crisis, as tools for assessing aid and to target the most vulnerable households. 
 
-RCSI is right skewed in the survey data
+
+$rcsi\_score= foodcoping1 + (foodcoping2 * 2) + foodcoping3 + (foodcoping4 * 3) + foodcoping5$
+
+Participants are asked five questions about their food habits in the past seven day:
+
+1. foodcoping1 =	In the past 7 days, how many days has your household had to: Rely on less preferred and less expensive food because you did not have enough food or money to buy food?
+
+2. foodcoping2 = In the past 7 days, how many days has your household had to: Borrow food or rely on help from a relative or friend because you did not have enough food or money to buy food? 
+
+3. foodcoping3 = In the past 7 days, how many days has your household had to: Limit portion size of meals because you did not have enough food or money to buy food?
+
+4. foodcoping4 = In the past 7 days, how many days has your household had to: Restrict consumption by adults in order for small children to eat because you did not have enough food or money to buy food?
+
+5. foodcoping5 =	In the past 7 days, how many days has your household had to: Reduce the number of meals eaten per day because you did not have enough food or money to buy food?
+
+In this case, the RCSI is right skewed which suggests that although many households are facing food insecurity, the majority of households experience food insecurity below the mean in the seven days prior. Interventions could target households right of the median to alleviate the most severe cases of food insecurity or aim to affect the largest number of households by targeting aid on those falling below the mean.
+
 ```{r RCSI Score, warning=FALSE, error=FALSE, message=FALSE}
 
 #calculate RCSI Score
@@ -260,13 +264,15 @@ summary(un_survey$rcsi_score)
 
 #Plot RCSI distribution
 ggplot(un_survey, aes(x=rcsi_score)) +
- geom_histogram(colour="black", fill="white", binwidth = 1) +
+ geom_histogram(color="white", binwidth = 1) +
     labs(
     title = "RCSI Score Distribution",
     subtitle = "UNHCR Survey Data Afghanistan 2021",
     x = "RCSI Score",
     y = "Frequency"
-  )
+  ) +
+  scale_x_continuous(breaks = seq(0, 100, by = 2)) +
+  scale_y_continuous(breaks= seq(0, 10000, by=500))
 
 ```
 
@@ -809,6 +815,8 @@ The three factors that have the most impact are the existence of bases, urbaniza
 
 If we are interested in both improving the situation of already displaced persons and preventing, research suggests that access to health, water, food along with physical safety may led to more desirable outcomes. However, these factors are outside the scope of this current study.
 
+Aligning U.S. foreign policy to these outcomes might require a shift away from sanctions, specifically [Executive Order (E.O.) 13224](https://ofac.treasury.gov/media/5536/download?inline) which names the Taliban as a Specially Designated Global Terrorist (SDGTs). While existing sanctions do not prohibit humanitarian assistance in Afghanistan outright, they do pose significant barriers to humanitarian aid projects and other transactions that involve Afghan authorities. 
+
 See: 
 Tai, X.H., Mehra, S. & Blumenstock, J.E. Mobile phone data reveal the effects of violence on internal displacement in Afghanistan. Nat Hum Behav 6, 624–634 (2022). https://doi.org/10.1038/s41562-022-01336-4
 
@@ -817,7 +825,7 @@ Huynh, B., & Basu, S. (2020). Forecasting Internally Displaced Population Migrat
 #### (4.4) Based on your selected most influential factors in 4.3, list five districts where people need the
 most support on these factors.
 
-Given the model analysis, the selection should target places with the least urbanization and anybase index, and the highest nighlight index. 
+Given the model analysis, the selection should target places with the highest urbanization and 'anybase' (proximity to a U.S. military base) index, and the highest 'nighlight' (amount of nightime light detected) index. 
 
 ```{r Factors}
 
