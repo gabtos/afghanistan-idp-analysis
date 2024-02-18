@@ -9,3 +9,12 @@ In summary this project:
 * Detects patterns of displacement
 * Evaluates the representativeness of data derived from cellphone mobility and population information
 * Identifies factors that contribute to financial distress, and a lack of access to public services, health, and adequate food supplies
+
+The analysis and corresponding code is available online via: 
+
+### Github Pages
+https://gabtos.github.io/afghanistan-idp-analysis/ 
+
+### PDF
+https://github.com/gabtos/afghanistan-idp-analysis/blob/main/Toscano_Capstone.pdf
+
