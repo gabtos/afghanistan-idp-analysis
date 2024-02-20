@@ -1,7 +1,6 @@
 ---
 title: "R Analysis of Internally Displaced Persons in Afghanistan Following 2021 Change of Authority"
 author: "Gabriel Toscano"
-date: "2023-07-28"
 output:
   html_document:
     toc: yes
