@@ -115,7 +115,7 @@ ggplot() +
 ```
 
 
-```{r top districts, warning=FALSE}
+```{r top districts_1, warning=FALSE}
 
 top_10_districts <- un_survey %>% 
   dplyr::select(district, total_members, DISTID) %>% 
@@ -136,7 +136,7 @@ knitr::kable(
 
 
 
-```{r top_districts}
+```{r top_districts_2}
 
   top_10_districts %>% 
     select(district, number_of_idps) %>% 
