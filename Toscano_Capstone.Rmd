@@ -18,6 +18,7 @@ Using UNHCR survey data, this project detects and diagnoses displacement followi
 * Detects patterns of displacement
 * Evaluates the representativeness of data derived from cellphone mobility and population information
 * Identifies factors that contribute to financial distress, and a lack of access to public services, health, and adequate food supplies
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
